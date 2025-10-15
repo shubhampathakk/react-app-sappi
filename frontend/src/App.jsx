@@ -1,4 +1,4 @@
-import React, from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Settings, ArrowRight, Plus, Trash2, Edit } from 'lucide-react';
 
 // In a real production setup, this should be configured during the build process
