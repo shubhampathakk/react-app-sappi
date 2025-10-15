@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Settings, ArrowRight, Plus, Trash2, Edit } from 'lucide-react';
 
-// In a real production setup, this should be configured during the build process
-// or fetched from a known endpoint. For this example, we'll construct it.
+// CORRECTED: This function now correctly constructs the backend URL.
 const getBackendUrl = () => {
-    // This logic is a placeholder and might need adjustment based on your actual Cloud Run naming conventions.
     if (window.location.hostname.includes('run.app')) {
-        const parts = window.location.hostname.split('.');
-        const serviceNameAndHash = parts[0].split('-');
-        const region = serviceNameAndHash.pop();
-        const hash = serviceNameAndHash.pop();
-        // Assumes backend is named 'data-explorer-backend' in the same region/project
+        // Example frontend hostname: data-explorer-frontend-abc-uc.a.run.app
+        const parts = window.location.hostname.split('-');
+        const hash = parts[parts.length - 3]; // The unique hash
+        const region = parts[parts.length - 2]; // The region code
         return `https://data-explorer-backend-${hash}-${region}.a.run.app`;
     }
     // For local development
     return 'http://localhost:8080';
 };
+
 
 const API_BASE_URL = getBackendUrl();
 

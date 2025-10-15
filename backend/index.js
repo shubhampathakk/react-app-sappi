@@ -6,10 +6,30 @@ const cors = require('cors');
 const app = express();
 app.use(express.json());
 
-// In a production environment, it is more secure to specify the exact origin
-// of your frontend service instead of using a wildcard.
-// Example: const corsOptions = { origin: 'https://data-explorer-frontend-....a.run.app' };
-app.use(cors());
+// IMPROVED: More specific CORS configuration for better security.
+// This is a dynamic way to get the frontend's expected URL.
+const { CLOUD_RUN_HASH, CLOUD_RUN_REGION } = (() => {
+    const serviceName = process.env.K_SERVICE || '';
+    if (serviceName.includes('-')) {
+        const parts = serviceName.split('-');
+        return {
+            CLOUD_RUN_HASH: parts[parts.length - 2],
+            CLOUD_RUN_REGION: parts[parts.length - 1],
+        };
+    }
+    return {};
+})();
+
+const frontendUrl = CLOUD_RUN_HASH && CLOUD_RUN_REGION
+    ? `https://data-explorer-frontend-${CLOUD_RUN_HASH}-${CLOUD_RUN_REGION}.a.run.app`
+    : null;
+
+const corsOptions = {
+    origin: frontendUrl || 'http://localhost:3000', // Fallback for local dev
+};
+
+app.use(cors(corsOptions));
+
 
 const bigquery = new BigQuery();
 const auth = new GoogleAuth();
