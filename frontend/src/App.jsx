@@ -1,6 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Settings, ArrowRight, Plus, Trash2, Edit } from 'lucide-react';
 
+// Helper to get the backend URL
+// In a real production setup, this should be configured during the build process
+// or fetched from a known endpoint. For this example, we'll construct it.
+const getBackendUrl = () => {
+    if (window.location.hostname.includes('run.app')) {
+        // Assumes backend is named 'data-explorer-backend' in the same region/project
+        const parts = window.location.hostname.split('-');
+        const hash = parts[1];
+        const region = parts[2];
+        return `https://data-explorer-backend-${hash}-${region}.a.run.app`;
+    }
+    // For local development
+    return 'http://localhost:8080';
+};
+
+const API_BASE_URL = getBackendUrl();
+
 const App = () => {
   const [view, setView] = useState('query'); // 'query' or 'admin'
   const [config, setConfig] = useState([]);
@@ -16,19 +33,45 @@ const App = () => {
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState(null);
 
+  // MOCK_COLUMNS will be replaced by a real API call if schemas are available
   const MOCK_COLUMNS = {
     "Sales_Report": ["product_id", "sale_date", "amount", "region", "customer_id"],
     "Inventory_Levels": ["product_id", "warehouse_id", "quantity_on_hand", "last_updated"],
+    "Legacy_Finance_Data": ["document_id", "posting_date", "amount_in_local_currency", "cost_center"]
   };
 
+  const apiFetch = async (url, options = {}) => {
+      try {
+          // IAP automatically handles authentication via cookies, 
+          // so we don't need to add Authorization headers from the client.
+          const response = await fetch(url, options);
+          if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: 'An unknown error occurred' }));
+              throw new Error(errorData.error || `Request failed with status ${response.status}`);
+          }
+          if (response.status === 204) {
+              return null;
+          }
+          return response.json();
+      } catch (err) {
+          console.error("API Fetch Error:", err);
+          setError(err.message);
+          throw err;
+      }
+  };
+
+
   const fetchConfig = useCallback(async () => {
-    // In a real app, this would fetch from your Cloud Run config service
-    const mockConfig = [
-      { id: '1', entity_name: 'Sales_Report', display_name: 'Sales Report', source_of_system: 'SCM-BQ', source_details: JSON.stringify({ projectId: 'your-gcp-project', datasetId: 'sales_data', tableId: 'sales_report_2024' }) },
-      { id: '2', entity_name: 'Inventory_Levels', display_name: 'Inventory Levels', source_of_system: 'SCM-BQ', source_details: JSON.stringify({ projectId: 'your-gcp-project', datasetId: 'inventory', tableId: 'current_inventory' }) },
-      { id: '3', entity_name: 'Legacy_Finance_Data', display_name: 'Legacy Finance Data', source_of_system: 'SAP-BW', source_details: JSON.stringify({ queryName: 'Z_FIN_Q001' }) },
-    ];
-    setConfig(mockConfig);
+    setIsLoading(true);
+    setError(null);
+    try {
+        const data = await apiFetch(`${API_BASE_URL}/api/config`);
+        setConfig(data);
+    } catch (err) {
+        // Error is already set by apiFetch
+    } finally {
+        setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -37,6 +80,7 @@ const App = () => {
 
   useEffect(() => {
     if (selectedEntity) {
+      // In a real app, you might fetch schema/columns from the backend
       setColumns(MOCK_COLUMNS[selectedEntity.entity_name] || []);
       setSelectedColumns([]);
       setFilters([]);
@@ -85,56 +129,52 @@ const App = () => {
     setResults(null);
 
     try {
-      if (selectedEntity.source_of_system === 'SCM-BQ') {
-        console.log("Querying BigQuery...");
-        const sourceDetails = JSON.parse(selectedEntity.source_details);
         const payload = {
-          projectId: sourceDetails.projectId,
-          datasetId: sourceDetails.datasetId,
-          tableId: sourceDetails.tableId,
-          columns: selectedColumns,
-          filters: filters,
-          limit: 1000
+          entity: selectedEntity,
+          query: {
+              columns: selectedColumns,
+              filters: filters,
+              limit: 1000
+          }
         };
         
-        // Mock Response
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        const mockData = {
-            success: true,
-            data: Array.from({ length: 5 }, (_, i) => 
-                selectedColumns.reduce((acc, col) => {
-                    acc[col] = `${col}_value_${i + 1}`;
-                    return acc;
-                }, {})
-            )
-        };
+        const responseData = await apiFetch(`${API_BASE_URL}/api/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-
-        if (mockData.success) {
-          setResults(mockData.data);
+        if (responseData.success) {
+          setResults(responseData.data);
         } else {
-          setError(mockData.error || "An unknown error occurred.");
+          setError(responseData.error || "An unknown error occurred during query execution.");
         }
-      } else if (selectedEntity.source_of_system === 'SAP-BW') {
-        console.log("Querying SAP-BW via Apigee...");
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setResults([{ note: "Data from SAP-BW would be displayed here." }]);
-      }
     } catch (err) {
-      setError("Failed to fetch data. " + err.message);
+      // error state is set within apiFetch
     } finally {
       setIsLoading(false);
     }
   };
   
-  const handleSaveEntity = (entityData) => {
-      if (editingEntity) {
-          setConfig(config.map(e => e.id === entityData.id ? entityData : e));
-      } else {
-          setConfig([...config, { ...entityData, id: (config.length + 1).toString() }]);
+  const handleSaveEntity = async (entityData) => {
+      const isEditing = !!editingEntity;
+      const url = isEditing 
+          ? `${API_BASE_URL}/api/config/${editingEntity.entity_name}`
+          : `${API_BASE_URL}/api/config`;
+      const method = isEditing ? 'PUT' : 'POST';
+
+      try {
+          await apiFetch(url, {
+              method: method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(entityData)
+          });
+          setAdminModalOpen(false);
+          setEditingEntity(null);
+          fetchConfig(); // Refresh the config list
+      } catch (err) {
+          // Error is displayed by apiFetch
       }
-      setAdminModalOpen(false);
-      setEditingEntity(null);
   };
   
   const handleEditEntity = (entity) => {
@@ -142,13 +182,19 @@ const App = () => {
       setAdminModalOpen(true);
   };
   
-  const handleDeleteEntity = (entityId) => {
+  const handleDeleteEntity = async (entityName) => {
       if (window.confirm("Are you sure you want to delete this entity?")) {
-        setConfig(config.filter(e => e.id !== entityId));
+        try {
+            await apiFetch(`${API_BASE_URL}/api/config/${entityName}`, { method: 'DELETE' });
+            fetchConfig(); // Refresh
+        } catch(err) {
+            // Error displayed by apiFetch
+        }
       }
   };
 
-
+  // ... The rest of the JSX components (QueryBuilder, AdminView, AdminModal, ResultsTable) remain the same ...
+  // Minor change in AdminView to pass entity_name to handleDeleteEntity
   const QueryBuilder = () => (
     <div className="space-y-6">
       <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
@@ -295,7 +341,7 @@ const App = () => {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                     {config.map(entity => (
-                        <tr key={entity.id}>
+                        <tr key={entity.entity_name}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{entity.display_name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{entity.entity_name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -306,7 +352,7 @@ const App = () => {
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <div className="flex items-center space-x-4">
                                     <button onClick={() => handleEditEntity(entity)} className="text-blue-600 hover:text-blue-900 flex items-center"><Edit size={16} className="mr-1"/> Edit</button>
-                                    <button onClick={() => handleDeleteEntity(entity.id)} className="text-red-600 hover:text-red-900 flex items-center"><Trash2 size={16} className="mr-1"/> Delete</button>
+                                    <button onClick={() => handleDeleteEntity(entity.entity_name)} className="text-red-600 hover:text-red-900 flex items-center"><Trash2 size={16} className="mr-1"/> Delete</button>
                                 </div>
                             </td>
                         </tr>
@@ -336,8 +382,9 @@ const App = () => {
     const handleSubmit = (e) => {
       e.preventDefault();
       try {
-        JSON.parse(formData.source_details);
-        onSave(formData);
+        // Ensure source_details is valid JSON before saving
+        const parsedDetails = JSON.parse(formData.source_details);
+        onSave({...formData, source_details: parsedDetails });
       } catch (error) {
         alert("Source Details must be valid JSON.");
       }
@@ -354,7 +401,7 @@ const App = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Entity Name (unique identifier)</label>
-              <input type="text" name="entity_name" value={formData.entity_name} onChange={handleChange} required className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 font-mono"/>
+              <input type="text" name="entity_name" value={formData.entity_name} onChange={handleChange} required disabled={!!entity} className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 font-mono disabled:bg-gray-100"/>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Source of System</label>
@@ -365,7 +412,7 @@ const App = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Source Details (JSON)</label>
-              <textarea name="source_details" rows="4" value={formData.source_details} onChange={handleChange} required className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 font-mono"></textarea>
+              <textarea name="source_details" rows="4" value={typeof formData.source_details === 'object' ? JSON.stringify(formData.source_details, null, 2) : formData.source_details} onChange={handleChange} required className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md py-2 px-3 focus:ring-blue-500 focus:border-blue-500 font-mono"></textarea>
             </div>
             <div className="flex justify-end space-x-3 pt-4">
               <button type="button" onClick={onClose} className="bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300">Cancel</button>
@@ -430,6 +477,7 @@ const App = () => {
                        {view === 'query' ? <Settings size={24} /> : <HelpCircle size={24} />}
                     </button>
                     <div className="flex items-center">
+                        {/* This would be dynamically populated via IAP headers in a real app */}
                         <span className="text-sm font-medium text-gray-600">user@example.com</span>
                         <div className="ml-3 h-8 w-8 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 font-bold">
                            U
