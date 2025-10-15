@@ -1,0 +1,18 @@
+server {
+  # This tells Nginx to listen on the port provided by Cloud Run
+  listen ${PORT};
+
+  # Standard server configuration
+  location / {
+    root   /usr/share/nginx/html;
+    index  index.html index.htm;
+    # This is important for single-page applications like React
+    try_files $uri $uri/ /index.html;
+  }
+
+  error_page   500 502 503 504  /50x.html;
+  location = /50x.html {
+    root   /usr/share/nginx/html;
+  }
+}
+
