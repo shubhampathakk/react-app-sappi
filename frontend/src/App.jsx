@@ -1,14 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Settings, ArrowRight, Plus, Trash2, Edit } from 'lucide-react';
 
-// CORRECTED: This function now correctly constructs the backend URL.
 const getBackendUrl = () => {
     if (window.location.hostname.includes('run.app')) {
-        // Example frontend hostname: data-explorer-frontend-abc-uc.a.run.app
-        const parts = window.location.hostname.split('-');
-        const hash = parts[parts.length - 3]; // The unique hash
-        const region = parts[parts.length - 2]; // The region code
-        return `https://data-explorer-backend-${hash}-${region}.a.run.app`;
+        const backendHostname = window.location.hostname.replace('frontend', 'backend');
+        return `https:${backendHostname}`;
     }
     // For local development
     return 'http://localhost:8080';

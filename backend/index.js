@@ -6,26 +6,33 @@ const cors = require('cors');
 const app = express();
 app.use(express.json());
 
-// IMPROVED: More specific CORS configuration for better security.
-// This is a dynamic way to get the frontend's expected URL.
-const { CLOUD_RUN_HASH, CLOUD_RUN_REGION } = (() => {
-    const serviceName = process.env.K_SERVICE || '';
-    if (serviceName.includes('-')) {
-        const parts = serviceName.split('-');
-        return {
-            CLOUD_RUN_HASH: parts[parts.length - 2],
-            CLOUD_RUN_REGION: parts[parts.length - 1],
-        };
-    }
-    return {};
-})();
-
-const frontendUrl = CLOUD_RUN_HASH && CLOUD_RUN_REGION
-    ? `https://data-explorer-frontend-${CLOUD_RUN_HASH}-${CLOUD_RUN_REGION}.a.run.app`
-    : null;
-
+// CORRECTED: Dynamic CORS configuration for better security.
+// This version safely handles all origins without crashing.
 const corsOptions = {
-    origin: frontendUrl || 'http://localhost:3000', // Fallback for local dev
+  origin: function (origin, callback) {
+    // origin is the URL of the frontend making the request, e.g.:
+    // https://data-explorer-frontend-673796126218.us-central1.run.app
+
+    if (!origin) {
+      // Allow requests with no origin (like health checks, Postman)
+      return callback(null, true);
+    }
+
+    if (origin === 'http://localhost:3000') {
+      // Allow local development
+      return callback(null, true);
+    }
+
+    // Check if the origin matches the expected Cloud Run URL pattern
+    if (origin.startsWith('https://data-explorer-frontend-') && origin.endsWith('.run.app')) {
+      // This is a trusted frontend URL.
+      return callback(null, true);
+    }
+
+    // This is an untrusted origin. Block it by passing 'false'.
+    // This will NOT throw an error or crash the server.
+    callback(null, false);
+  },
 };
 
 app.use(cors(corsOptions));
